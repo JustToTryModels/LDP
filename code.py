@@ -90,8 +90,7 @@ if final_model and best_features:
                 placeholder="Enter value...", # Placeholder text
                 min_value=0.0,
                 max_value=2500.0,
-                step=0.1,
-                format="%.1f",
+                step=None, # Allow any float value
                 help=tooltips.get(feature, "Enter the measured value.")
             )
 
@@ -104,8 +103,7 @@ if final_model and best_features:
                 placeholder="Enter value...",
                 min_value=0.0,
                 max_value=2500.0,
-                step=0.1,
-                format="%.1f",
+                step=None, # Allow any float value
                 help=tooltips.get(feature, "Enter the measured value.")
             )
             
