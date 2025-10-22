@@ -3,134 +3,164 @@ import pandas as pd
 import numpy as np
 import joblib
 import requests
-import os
+import io
 
-# Set basic Streamlit config
-st.set_page_config(page_title="Liver Disease Prediction", layout="wide")
+# --- CONFIGURATION ---
+st.set_page_config(
+    page_title="Liver Disease Predictor",
+    page_icon="⚕️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.markdown("# 🩺 Liver Disease Prediction App")
-st.markdown("Upload patient data to predict the presence of **Liver Disease** using a trained **Random Forest model**.")
-
-# ------------------------------------------------------------------------------
-# Load model and features from GitHub
-# ------------------------------------------------------------------------------
-
+# --- MODEL AND FEATURE LOADING ---
+# Use st.cache_resource to load the model and features only once
 @st.cache_resource
 def load_model_and_features():
-    model_url = "https://github.com/JustToTryModels/LDP/raw/main/LDP_RFC_Model/final_random_forest_model.joblib"
-    features_url = "https://github.com/JustToTryModels/LDP/raw/main/LDP_RFC_Model/selected_features_list.joblib"
+    """
+    Loads the trained model and the list of selected features from GitHub.
+    """
+    try:
+        # URLs to the raw files on GitHub
+        model_url = "https://github.com/JustToTryModels/LDP/raw/main/LDP_RFC_Model/final_random_forest_model.joblib"
+        features_url = "https://github.com/JustToTryModels/LDP/raw/main/LDP_RFC_Model/selected_features_list.joblib"
 
-    model_filename = "final_random_forest_model.joblib"
-    features_filename = "selected_features_list.joblib"
+        # Download the model file
+        model_response = requests.get(model_url)
+        model_response.raise_for_status()  # Raise an exception for bad status codes
+        model_file = io.BytesIO(model_response.content)
+        model = joblib.load(model_file)
 
-    # Download model file if not exists
-    if not os.path.isfile(model_filename):
-        with open(model_filename, "wb") as f:
-            f.write(requests.get(model_url).content)
+        # Download the features file
+        features_response = requests.get(features_url)
+        features_response.raise_for_status()
+        features_file = io.BytesIO(features_response.content)
+        features_list = joblib.load(features_file)
 
-    if not os.path.isfile(features_filename):
-        with open(features_filename, "wb") as f:
-            f.write(requests.get(features_url).content)
+        return model, features_list
+    except Exception as e:
+        st.error(f"Error loading model artifacts: {e}")
+        st.info("Please ensure the GitHub repository and files are public and the URLs are correct.")
+        return None, None
 
-    model = joblib.load(model_filename)
-    selected_features = joblib.load(features_filename)
-
-    return model, selected_features
-
+# Load the model and features
 model, selected_features = load_model_and_features()
 
-# Sample Input Info
-feature_explanations = {
-    "Alkphos_Alkaline_Phosphotase": "Alkaline Phosphatase (U/L)",
-    "Sgot_Aspartate_Aminotransferase": "SGOT - Aspartate Aminotransferase (U/L)",
-    "Sgpt_Alamine_Aminotransferase": "SGPT - Alamine Aminotransferase (U/L)",
-    "Total_Bilirubin": "Total Bilirubin (mg/dL)",
-    "Total_Proteins": "Total Proteins (g/dL)",
-    "Direct_Bilirubin": "Direct Bilirubin (mg/dL)",
-    "ALB_Albumin": "Albumin (g/dL)",
-    "A/G_Ratio_Albumin_and_Globulin_Ratio": "Albumin/Globulin Ratio"
-}
+# --- HELPER FUNCTION ---
+def format_feature_name(name):
+    """Cleans up feature names for display."""
+    return name.replace('_', ' ').title()
 
-# ------------------------------------------------------------------------------
-# Input Method (Form or CSV Upload)
-# ------------------------------------------------------------------------------
-
-input_method = st.radio("Select Input Method", ["Manual Entry", "Upload CSV"])
-
-if input_method == "Manual Entry":
-    st.markdown("## ✍️ Provide Patient Details:")
-
-    user_input = {}
-    for feature in selected_features:
-        explanation = feature_explanations.get(feature, feature)
-        val = st.number_input(f"{explanation}", format="%.4f", key=feature)
-        user_input[feature] = val
-
-    input_df = pd.DataFrame([user_input])
-
-elif input_method == "Upload CSV":
-    st.markdown("## 📤 Upload CSV File:")
-
-    uploaded_file = st.file_uploader("Choose a CSV file with patient lab values", type=["csv"])
-
-    if uploaded_file is not None:
-        try:
-            df_uploaded = pd.read_csv(uploaded_file)
-            missing = [f for f in selected_features if f not in df_uploaded.columns]
-            if len(missing) > 0:
-                st.error(f"CSV is missing required columns: {missing}")
-                st.stop()
-            else:
-                input_df = df_uploaded[selected_features]
-                st.success(f"✔️ Loaded {len(input_df)} samples from CSV!")
-        except Exception as e:
-            st.error(f"❌ Error reading CSV: {e}")
-            st.stop()
-    else:
-        st.warning("⚠️ Please upload a CSV file to continue.")
-        input_df = None
-
-# ------------------------------------------------------------------------------
-# Prediction
-# ------------------------------------------------------------------------------
-
-if input_df is not None and st.button("🔍 Predict"):
-    predictions = model.predict(input_df)
-    probabilities = model.predict_proba(input_df)
-
-    st.markdown("## 🧪 Prediction Results:")
-
-    results = []
-    for i in range(len(input_df)):
-        pred = predictions[i]
-        prob = probabilities[i][pred]
-        label = "Liver Disease" if pred == 1 else "Non-Liver Disease"
-        color = "🟥" if pred == 1 else "🟩"
-        results.append((i + 1, label, f"{prob*100:.2f}%", color))
-
-    results_df = pd.DataFrame(results, columns=["Patient#", "Prediction", "Confidence", "Status"])
-    st.dataframe(results_df, use_container_width=True)
-
-    # Summary counts
-    liver_count = np.sum(predictions == 1)
-    non_liver_count = np.sum(predictions == 0)
-
-    st.markdown(f"""
-    ### 📊 Summary:
-    - Total Patients: **{len(predictions)}**
-    - 🟥 Predicted with Liver Disease: **{liver_count}**
-    - 🟩 Predicted Non-Liver Disease: **{non_liver_count}**
+# --- UI LAYOUT ---
+if model is not None and selected_features is not None:
+    # --- HEADER ---
+    st.title("🩺 Liver Disease Prediction Tool")
+    st.markdown("""
+    This application uses a **Random Forest Classifier** to predict the likelihood of liver disease based on diagnostic measurements.
+    
+    **Instructions:**
+    1.  Adjust the sliders in the sidebar to match the patient's test results.
+    2.  The model will automatically update the prediction based on your inputs.
+    3.  Review the prediction and confidence score below.
+    
+    ---
     """)
 
-# ------------------------------------------------------------------------------
-# Sample CSV Template
-# ------------------------------------------------------------------------------
+    # --- SIDEBAR FOR USER INPUT ---
+    st.sidebar.header("Patient Data Input")
+    st.sidebar.markdown("Use the sliders to enter patient information.")
 
-with st.expander("📁 Download Sample CSV Format"):
-    st.markdown("This is the correct format for uploading multiple patient records.")
-    sample_df = pd.DataFrame(columns=selected_features)
-    st.download_button("📥 Download Template CSV", sample_df.to_csv(index=False), "sample_input_template.csv")
+    # Create a dictionary to hold user inputs
+    input_data = {}
 
-st.markdown("---")
-st.markdown("*Model trained using Random Forest and feature selection based on MDI.*")
-st.markdown("🔗 [GitHub Repository](https://github.com/JustToTryModels/LDP)")
+    # Dynamically create sliders for each feature the model needs
+    # Using educated guesses for min, max, and default values.
+    # You can adjust these based on your dataset's statistics (e.g., df.describe()).
+    feature_defaults = {
+        'Alkphos_Alkaline_Phosphotase': (30, 1000, 120),
+        'Sgot_Aspartate_Aminotransferase': (10, 500, 40),
+        'Sgpt_Alamine_Aminotransferase': (10, 500, 45),
+        'Total_Bilirubin': (0.1, 20.0, 1.0),
+        'Total_Proteins': (4.0, 10.0, 7.0),
+        'Direct_Bilirubin': (0.1, 10.0, 0.4),
+        'ALB_Albumin': (2.0, 6.0, 4.0),
+        'A/G_Ratio_Albumin_and_Globulin_Ratio': (0.5, 2.5, 1.1)
+    }
+
+    for feature in selected_features:
+        min_val, max_val, default_val = feature_defaults.get(feature, (0, 100, 50))
+        input_data[feature] = st.sidebar.slider(
+            label=format_feature_name(feature),
+            min_value=float(min_val),
+            max_value=float(max_val),
+            value=float(default_val),
+            step=0.1
+        )
+    
+    st.sidebar.info("The `A/G Ratio` may be automatically calculated in a real lab setting but is included here for completeness.")
+
+    # --- PREDICTION AND DISPLAY ---
+    col1, col2 = st.columns([2, 3])
+
+    with col1:
+        st.subheader("Prediction Result")
+
+        # Convert input data to a DataFrame in the correct order
+        input_df = pd.DataFrame([input_data])
+        input_df = input_df[selected_features] # Ensure column order matches training
+
+        # Make prediction
+        prediction = model.predict(input_df)[0]
+        prediction_proba = model.predict_proba(input_df)[0]
+
+        # Display the result
+        if prediction == 1:
+            st.error("Prediction: Liver Disease LIKELY", icon="⚠️")
+            confidence_score = prediction_proba[1]
+        else:
+            st.success("Prediction: Liver Disease UNLIKELY", icon="✅")
+            confidence_score = prediction_proba[0]
+
+        # Display confidence score
+        st.metric(label="Confidence Score", value=f"{confidence_score:.2%}")
+        st.markdown("""
+        *The confidence score represents the model's certainty in its prediction. Higher scores indicate greater confidence.*
+        """)
+        
+        st.warning("""
+        **Disclaimer:** This is an AI-powered prediction tool. It is **not a substitute for professional medical advice**, diagnosis, or treatment. Always consult with a qualified healthcare provider for any health concerns.
+        """)
+
+
+    with col2:
+        st.subheader("Input Values Summary")
+        
+        # Create a clean DataFrame for display
+        display_df = pd.DataFrame({
+            "Medical Test": [format_feature_name(f) for f in input_df.columns],
+            "Value": [f"{v:.1f}" for v in input_df.iloc[0].values]
+        })
+        st.table(display_df.set_index("Medical Test"))
+
+
+    # --- MODEL INFO EXPANDER ---
+    with st.expander("ℹ️ About the Model and Features"):
+        st.markdown(f"""
+        This prediction is generated by a `RandomForestClassifier` model.
+        
+        **Model Details:**
+        - **Imbalance Handling:** `class_weight='balanced'` was used during training.
+        - **Feature Selection:** The model was trained on a subset of features selected for optimal performance.
+        
+        **Features Used for Prediction:**
+        """)
+        
+        # Create a list of features with bullet points
+        feature_list_md = ""
+        for feature in selected_features:
+            feature_list_md += f"- **{format_feature_name(feature)}**\n"
+        st.markdown(feature_list_md)
+
+else:
+    st.error("Model could not be loaded. The application cannot start.")
+    st.markdown("Please check the console or server logs for detailed error messages.")
